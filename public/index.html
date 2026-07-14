@@ -1161,5 +1161,36 @@ async function addPrivateFiles(list){try{const files=[...list];if(!files.length)
 async function openPrivateFile(id){const file=await privateFile(id);if(!file)return alert('That private file is no longer available.');const url=URL.createObjectURL(file.blob);const opened=window.open(url,'_blank','noopener');if(!opened)window.location.href=url;setTimeout(()=>URL.revokeObjectURL(url),60000)}
 async function deletePrivateFile(id,name){if(!confirm(`Delete ${name}? This removes it only from this browser.`))return;const db=await privateFilesDb();const tx=db.transaction(PRIVATE_FILES_STORE,'readwrite');tx.objectStore(PRIVATE_FILES_STORE).delete(id);await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();renderPrivateFiles()}
 </script>
+<script>
+// ROOM ADMIN — only the host token for the current room can reach the server endpoint below.
+const baseRenderRoomBoard=renderRoomBoard;
+renderRoomBoard=function(room){
+  baseRenderRoomBoard(room);
+  document.getElementById('room-admin-actions')?.remove();
+  if(!liveHostToken)return;
+  const actions=document.createElement('div');
+  actions.id='room-admin-actions';
+  actions.style.cssText='margin-top:10px;display:flex;justify-content:flex-end';
+  const removeRoom=document.createElement('button');
+  removeRoom.className='member-remove';
+  removeRoom.textContent='Delete this room';
+  removeRoom.onclick=deleteLiveRoom;
+  actions.appendChild(removeRoom);
+  document.getElementById('room-board').appendChild(actions);
+};
+async function deleteLiveRoom(){
+  if(!confirm(`Delete room ${liveRoom}? This permanently removes its members and shared activity. It cannot be undone.`))return;
+  try{
+    await liveApi('/api/delete-room',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roomCode:liveRoom,hostToken:liveHostToken})});
+    if(liveEvents)clearInterval(liveEvents);
+    localStorage.removeItem('tracker_room');
+    localStorage.removeItem('tracker_host_token');
+    liveRoom='';liveHostToken='';
+    document.getElementById('live-status').textContent='PRIVATE';
+    document.getElementById('room-board').style.display='none';
+    alert('Room deleted. Your personal tracker remains intact.');
+  }catch(e){alert(e.message||'Could not delete this room.');}
+}
+</script>
 </body>
 </html>
