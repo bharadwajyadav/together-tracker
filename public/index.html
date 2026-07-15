@@ -358,7 +358,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-head);
     <div class="box">
       <div class="box-label">Focus hrs</div>
       <div class="stat-val" id="focus-hrs">0.0</div>
-      <div class="stat-sub">from completed sessions</div>
+      <div class="stat-sub">lifetime completed sessions</div>
     </div>
     <div class="box month-box">
       <div class="box-label">Monthly tasks</div>
@@ -422,6 +422,12 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-head);
 </div>
 <div class="live-overlay" id="private-files-overlay" style="display:none;">
   <div class="files-box"><h2>My private files</h2><p>Files remain only in this browser and are never sent to the room board, your friends, or Supabase. Add your <b>DSA War Room</b> HTML file here, then use <b>Open</b> whenever you want to study.</p><label class="files-drop">+ Add files from this computer<input id="private-file-picker" type="file" multiple onchange="addPrivateFiles(this.files)"></label><div id="private-files-list"></div><div class="live-actions"><button class="live-action" onclick="closePrivateFiles()">Close</button></div></div>
+</div>
+<div class="live-overlay" id="private-file-viewer" style="display:none;padding:16px;z-index:1001;">
+  <div style="width:min(1280px,100%);height:min(900px,100%);display:flex;flex-direction:column;gap:10px;">
+    <div class="live-actions" style="justify-content:flex-start"><button class="live-action" onclick="closePrivateFileViewer()">← Back to My Files</button></div>
+    <iframe id="private-file-frame" title="Private file viewer" style="width:100%;flex:1;border:1px solid var(--border2);border-radius:10px;background:#fff"></iframe>
+  </div>
 </div>
 <div class="cal-overlay" id="cal-overlay" style="display:none;">
   <div class="cal-box">
@@ -763,7 +769,16 @@ function getTlTasks(){
     t.startFrac>=0 && t.endFrac<=1 && t.endFrac>t.startFrac
   );
 }
-function saveTlTasks(t){ const s=load(); s.tlTasks=t; save(s); updateFocusHrs(); saveTodayConsistency(); }
+function saveTlTasks(t){
+  // A computer can sleep through the 5 AM timer. Never let an old timeline
+  // be written back into the new day when it wakes up.
+  if(load().lastDay!==getDayKey(new Date())){
+    checkDayRollover();
+    buildTimeline(); updateFocusHrs(); renderConsistencyGrid(); updateDiamonds();
+    return false;
+  }
+  const s=load(); s.tlTasks=t; save(s); updateFocusHrs(); saveTodayConsistency(); return true;
+}
 
 function buildTimeline(){
   const row=document.getElementById('tl-hours-row');
@@ -996,9 +1011,11 @@ function drawBracketPath(box, pathEl){
 // ── FOCUS HRS (from completed timeline tasks) ──
 function updateFocusHrs(){
   const tasks=getTlTasks();
-  let totalHrs=0;
-  tasks.forEach(t=>{ if(t.done) totalHrs+=(t.endFrac-t.startFrac)*TL_N; });
-  document.getElementById('focus-hrs').textContent=totalHrs.toFixed(1);
+  let todayMinutes=0;
+  tasks.forEach(t=>{ if(t.done) todayMinutes+=(t.endFrac-t.startFrac)*TL_N*60; });
+  // Completed sessions become permanent at the next 5 AM rollover.
+  const lifetimeMinutes=Number(load().lifetimeFocusMinutes||0);
+  document.getElementById('focus-hrs').textContent=((lifetimeMinutes+todayMinutes)/60).toFixed(1);
 }
 
 // ── CONSISTENCY / INTENSITY ──
@@ -1096,6 +1113,7 @@ function checkDayRollover(){
   // Day = 5AM to 5AM
   const now=new Date();
   const dayKey=getDayKey(now);
+  let changed=false;
   if(s.lastDay && s.lastDay!==dayKey){
     // Archive yesterday's timeline intensity
     const tasks=s.tlTasks||[];
@@ -1105,16 +1123,20 @@ function checkDayRollover(){
       const intensity=totalHrs>0?doneHrs/totalHrs:0;
       if(!s.consistency)s.consistency={};
       s.consistency[s.lastDay]={ intensity, done:tasks.filter(t=>t.done).map(t=>t.text||'(unnamed)'), pending:tasks.filter(t=>!t.done).map(t=>t.text||'(unnamed)') };
+      s.lifetimeFocusMinutes=Math.round(Number(s.lifetimeFocusMinutes||0)+doneHrs*60);
     }
     s.tlTasks=[];
+    changed=true;
     // Month reset
     const lastDate=new Date(s.lastDay+'T05:00:00');
     if(lastDate.getMonth()!==now.getMonth()||lastDate.getFullYear()!==now.getFullYear()){
       s.monthTasks=[[],[],[],[]]; activeWeek=0;
     }
   }
-  s.lastDay=dayKey; save(s);
+  if(s.lastDay!==dayKey){ s.lastDay=dayKey; changed=true; }
+  if(changed) save(s);
   pruneConsistency();
+  return changed;
 }
 
 function getDayKey(date){
@@ -1145,6 +1167,12 @@ updateDiamonds();
 updateClock();
 if(liveRoom&&liveUser) startLiveRoom();
 setInterval(updateClock,1000);
+// Clean up at the next minute even if the page stays open overnight.
+setInterval(()=>{
+  if(checkDayRollover()){
+    buildTimeline(); updateFocusHrs(); renderConsistencyGrid(); updateDiamonds();
+  }
+},60000);
 </script>
 <script>
 // PRIVATE FILE LIBRARY — IndexedDB only. Nothing below calls the room API or Supabase.
@@ -1158,17 +1186,36 @@ async function renderPrivateFiles(){const host=document.getElementById('private-
 function openPrivateFiles(){document.getElementById('private-files-overlay').style.display='flex';renderPrivateFiles()}
 function closePrivateFiles(){document.getElementById('private-files-overlay').style.display='none'}
 async function addPrivateFiles(list){try{const files=[...list];if(!files.length)return;if(files.some(file=>file.size>15*1024*1024))throw Error('Each file must be smaller than 15 MB.');const db=await privateFilesDb();const tx=db.transaction(PRIVATE_FILES_STORE,'readwrite');const store=tx.objectStore(PRIVATE_FILES_STORE);files.forEach(file=>store.put({id:crypto.randomUUID(),owner:privateFileOwner(),name:file.name,type:file.type,size:file.size,blob:file,createdAt:Date.now()}));await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();document.getElementById('private-file-picker').value='';renderPrivateFiles()}catch(e){alert(e.message||'Could not add those files.')}}
-async function openPrivateFile(id){const file=await privateFile(id);if(!file)return alert('That private file is no longer available.');const url=URL.createObjectURL(file.blob);const opened=window.open(url,'_blank','noopener');if(!opened)window.location.href=url;setTimeout(()=>URL.revokeObjectURL(url),60000)}
+let privateViewerUrl=null;
+async function openPrivateFile(id){const file=await privateFile(id);if(!file)return alert('That private file is no longer available.');if(privateViewerUrl)URL.revokeObjectURL(privateViewerUrl);privateViewerUrl=URL.createObjectURL(file.blob);document.getElementById('private-files-overlay').style.display='none';document.getElementById('private-file-frame').src=privateViewerUrl;document.getElementById('private-file-viewer').style.display='flex'}
+function closePrivateFileViewer(){document.getElementById('private-file-viewer').style.display='none';document.getElementById('private-file-frame').src='about:blank';if(privateViewerUrl){URL.revokeObjectURL(privateViewerUrl);privateViewerUrl=null}openPrivateFiles()}
 async function deletePrivateFile(id,name){if(!confirm(`Delete ${name}? This removes it only from this browser.`))return;const db=await privateFilesDb();const tx=db.transaction(PRIVATE_FILES_STORE,'readwrite');tx.objectStore(PRIVATE_FILES_STORE).delete(id);await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();renderPrivateFiles()}
 </script>
 <script>
 // ACCOUNT-BASED ROOMS — the same user code + password identifies the same person on every device.
-let accountUser=null, accountRoom='', accountTimer=null, accountSyncTimer=null, roomIntent='', pendingRoomCode='';
+let accountUser=null, accountRoom='', accountTimer=null, accountSyncTimer=null, personalSyncTimer=null, personalStateReady=false, roomIntent='', pendingRoomCode='';
 if(liveEvents) clearInterval(liveEvents);
 liveRoom=''; liveHostToken='';
 document.getElementById('room-board').style.display='none';
 function accountShape(user){return user&&{id:user.id,userCode:user.userCode||user.user_code,displayName:user.displayName||user.display_name}}
 async function accountApi(url,opts={}){const response=await fetch(url,opts);const data=await response.json();if(!response.ok)throw Error(data.error||'Request failed');return data}
+// Keep a local copy for fast rendering, then quietly mirror it to the signed-in
+// user's private server record. This data is never sent to room members.
+const browserSave=save;
+save=function(state){browserSave(state);queuePersonalStateSync()};
+function queuePersonalStateSync(){if(!accountUser||!personalStateReady)return;clearTimeout(personalSyncTimer);personalSyncTimer=setTimeout(syncPersonalState,500)}
+async function syncPersonalState(){if(!accountUser||!personalStateReady)return;try{await accountApi('/api/personal-state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({state:load()})})}catch(error){console.warn('Private tracker sync failed:',error)}}
+function rerenderPrivateTracker(){activeWeek=getCurrentWeek();renderSections();buildMonthTabs();renderMonthTasks();renderConsistencyGrid();buildTimeline();updateFocusHrs();updateDiamonds()}
+async function bootstrapPersonalState(){
+  if(!accountUser||personalStateReady)return;
+  const cloud=await accountApi('/api/personal-state');
+  if(cloud.state&&typeof cloud.state==='object') localStorage.setItem(SK,JSON.stringify(cloud.state));
+  personalStateReady=true;
+  if(!cloud.state) await syncPersonalState();
+  const rolled=checkDayRollover();
+  rerenderPrivateTracker();
+  if(rolled) queuePersonalStateSync();
+}
 window.openLiveModal=function(){
   const overlay=document.getElementById('live-overlay');
   overlay.innerHTML='<div class="live-box" id="account-room-box"></div>';
@@ -1183,7 +1230,7 @@ window.chooseRoomIntent=function(intent){roomIntent=intent;const box=document.ge
 window.showJoinMemberChoice=function(){const code=document.getElementById('account-room-code').value.trim();if(code.length<4)return alert('Use a room code with at least 4 characters.');pendingRoomCode=code;const box=document.getElementById('account-room-box');if(accountUser){box.innerHTML=`<h2>Join as ${accountUser.displayName}</h2><p>Room: ${code.toUpperCase()}</p><div class="live-actions"><button class="live-action" onclick="chooseRoomIntent('join')">Back</button><button class="live-action primary" onclick="finishRoom()">Join room</button></div>`;return}box.innerHTML='<h2>Are you already a member?</h2><p>Use the same user code and password on every device.</p><div class="live-actions" style="justify-content:flex-start"><button class="live-action primary" onclick="showAccountForm(\'login\')">Existing member</button><button class="live-action" onclick="showAccountForm(\'register\')">New member</button></div><div class="live-actions"><button class="live-action" onclick="chooseRoomIntent(\'join\')">Back</button></div>'};
 window.showExistingAdmin=function(){pendingRoomCode=document.getElementById('account-room-code').value.trim();if(pendingRoomCode.length<4)return alert('Choose a room code with at least 4 characters.');showAccountForm('login')};
 window.showAccountForm=function(mode){const box=document.getElementById('account-room-box');const extra=mode==='register'?'<input class="live-field" id="account-name" maxlength="32" placeholder="Your display name">':'';const heading=mode==='register'?'Create your account':'Sign in to your account';const copy=mode==='register'?'Choose a user code and password. You will use these on phone and laptop.':'Enter the user code and password you created earlier.';const back=roomIntent==='join'?'showJoinMemberChoice()':'chooseRoomIntent(\'create\')';box.innerHTML=`<h2>${heading}</h2><p>${copy}</p>${extra}<input class="live-field" id="account-code" maxlength="24" placeholder="User code (e.g. BHARADWAJ_26)"><input class="live-field" id="account-password" type="password" minlength="8" placeholder="Password (8+ characters)"><div class="live-error" id="account-error"></div><div class="live-actions"><button class="live-action" onclick="${back}">Back</button><button class="live-action primary" onclick="submitAccount('${mode}')">Continue</button></div>`};
-window.submitAccount=async function(action){try{const body={action,userCode:document.getElementById('account-code').value,password:document.getElementById('account-password').value};if(action==='register')body.displayName=document.getElementById('account-name').value;const data=await accountApi('/api/account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});accountUser=accountShape(data.user);liveUser=accountUser.id;liveName=accountUser.displayName;await finishRoom()}catch(error){document.getElementById('account-error').textContent=error.message}};
+window.submitAccount=async function(action){try{const body={action,userCode:document.getElementById('account-code').value,password:document.getElementById('account-password').value};if(action==='register')body.displayName=document.getElementById('account-name').value;const data=await accountApi('/api/account',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});accountUser=accountShape(data.user);liveUser=accountUser.id;liveName=accountUser.displayName;await bootstrapPersonalState();await finishRoom()}catch(error){document.getElementById('account-error').textContent=error.message}};
 window.finishRoom=async function(){try{const roomCode=pendingRoomCode||document.getElementById('account-room-code')?.value.trim();const data=await accountApi('/api/auth-room',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:roomIntent,roomCode})});accountRoom=data.room.code;liveRoom=accountRoom;liveHostToken=data.room.isOwner?'account-owner':'';localStorage.setItem('tracker_account_room',accountRoom);closeLiveModal();startAccountRoom()}catch(error){alert(error.message)}};
 function startAccountRoom(){if(!liveRoom||!accountUser)return;document.getElementById('live-status').textContent='LIVE · '+liveRoom;document.getElementById('room-board').style.display='block';clearInterval(accountTimer);accountTimer=setInterval(refreshAccountRoom,5000);refreshAccountRoom();queueAccountSync()}
 async function refreshAccountRoom(){if(!liveRoom)return;try{const room=await accountApi('/api/auth-room-board?roomCode='+encodeURIComponent(liveRoom));liveHostToken=room.isOwner?'account-owner':'';renderAccountBoard(room)}catch(error){clearInterval(accountTimer);localStorage.removeItem('tracker_account_room');liveRoom='';liveHostToken='';document.getElementById('live-status').textContent='PRIVATE';document.getElementById('room-board').style.display='none'}}
@@ -1191,7 +1238,7 @@ function renderAccountBoard(room){const host=document.getElementById('room-membe
 async function removeAccountMember(targetId,name){if(!confirm(`Remove ${name} from this room? They can rejoin only if you give them the room code again.`))return;try{await accountApi('/api/auth-remove-member',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roomCode:liveRoom,targetId})});refreshAccountRoom()}catch(error){alert(error.message)}}
 async function deleteAccountRoom(){if(!confirm(`Delete room ${liveRoom}? This permanently removes all shared room data.`))return;try{await accountApi('/api/auth-delete-room',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({roomCode:liveRoom})});clearInterval(accountTimer);localStorage.removeItem('tracker_account_room');liveRoom='';liveHostToken='';document.getElementById('live-status').textContent='PRIVATE';document.getElementById('room-board').style.display='none';alert('Room deleted. Your personal tracker remains intact.')}catch(error){alert(error.message)}}
 function queueAccountSync(){if(!liveRoom||!accountUser)return;clearTimeout(accountSyncTimer);accountSyncTimer=setTimeout(async()=>{try{await accountApi('/api/auth-snapshot',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({roomCode:liveRoom,consistency:load().consistency||{}})})}catch(error){console.warn(error)}},350)}
-(async function restoreAccount(){try{const data=await accountApi('/api/account?action=me');accountUser=accountShape(data.user);if(!accountUser)return;liveUser=accountUser.id;liveName=accountUser.displayName;const saved=localStorage.getItem('tracker_account_room');if(saved){liveRoom=saved;await refreshAccountRoom();if(liveRoom)startAccountRoom()}}catch(error){console.warn(error)}})();
+(async function restoreAccount(){try{const data=await accountApi('/api/account?action=me');accountUser=accountShape(data.user);if(!accountUser)return;liveUser=accountUser.id;liveName=accountUser.displayName;await bootstrapPersonalState();const saved=localStorage.getItem('tracker_account_room');if(saved){liveRoom=saved;await refreshAccountRoom();if(liveRoom)startAccountRoom()}}catch(error){console.warn(error)}})();
 </script>
 </body>
 </html>
