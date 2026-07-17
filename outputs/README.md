@@ -28,43 +28,6 @@ Private files stay in the browser that uploaded them. They are not uploaded to S
 - Supabase Postgres database
 - User-code and password based session login
 
-## Local setup
-
-1. Install Node.js.
-2. Clone the repository.
-3. Create a `.env` file in the project root:
-
-   ```env
-   SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SECRET_KEY
-   ```
-
-4. In Supabase, open **SQL Editor** and run the account/room schema migration first.
-5. Run `supabase/add-personal-tracker-state.sql` to enable private cross-device tracker sync.
-6. Start the app:
-
-   ```bash
-   node server.js
-   ```
-
-7. Open `http://localhost:3000`.
-
-## Deploy to Vercel
-
-1. Push this repository to GitHub.
-2. In Vercel, choose **Add New → Project** and import the repository.
-3. In **Project Settings → Environment Variables**, add:
-
-   | Name | Value |
-   | --- | --- |
-   | `SUPABASE_URL` | Your Supabase Project URL |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase secret/service-role key |
-
-4. Redeploy the project after adding the variables.
-5. Share the resulting `vercel.app` URL with friends.
-
-> Keep `SUPABASE_SERVICE_ROLE_KEY` in Vercel only. Never paste it into the frontend, GitHub, or a chat.
-
 ## How to use rooms
 
 1. Click **GO LIVE**.
