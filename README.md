@@ -1,38 +1,32 @@
+# Together Tracker
 
-1. Install Node.js.
-2. Clone the repository.
-3. Create a `.env` file in the project root:
+A private daily planner with an optional live room board for friends.
 
-   ```env
-   SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SECRET_KEY
-   ```
+Track goals, monthly tasks, a 5 AM-to-5 AM timeline, consistency, and lifetime focus hours. Create a room to compare 28-day consistency grids with friends; only room members can see the shared board.
 
-4. In Supabase, open **SQL Editor** and run the account/room schema migration first.
-5. Run `supabase/add-personal-tracker-state.sql` to enable private cross-device tracker sync.
-6. Start the app:
+## Features
 
-   ```bash
-   node server.js
-   ```
+- Personal daily timeline and completed-session focus tracking
+- Lifetime focus-hours total
+- Automatic daily rollover at 5:00 AM
+- Personal tracker sync across devices after signing in
+- Room codes for creating or joining a friend group
+- Shared 28-day consistency board with task hover details
+- Room owner can remove members or delete the room
+- Private file library for opening personal HTML files inside the tracker
 
-7. Open `http://localhost:3000`.
+## Privacy
 
-## Deploy to Vercel
+Your private tracker data is stored per account and is **not** displayed to friends. The shared room board only sends consistency intensity plus the completed/pending task names for that day.
 
-1. Push this repository to GitHub.
-2. In Vercel, choose **Add New → Project** and import the repository.
-3. In **Project Settings → Environment Variables**, add:
+Private files stay in the browser that uploaded them. They are not uploaded to Supabase and do not sync to another device.
 
-   | Name | Value |
-   | --- | --- |
-   | `SUPABASE_URL` | Your Supabase Project URL |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase secret/service-role key |
+## Tech stack
 
-4. Redeploy the project after adding the variables.
-5. Share the resulting `vercel.app` URL with friends.
-
-> Keep `SUPABASE_SERVICE_ROLE_KEY` in Vercel only. Never paste it into the frontend, GitHub, or a chat.
+- Plain HTML, CSS, and JavaScript frontend
+- Vercel serverless API routes
+- Supabase Postgres database
+- User-code and password based session login
 
 ## How to use rooms
 
@@ -73,4 +67,3 @@ supabase/
 - Database tables use Row Level Security with no public policies; server routes access them using Vercel environment variables.
 - This is a small private app, not a complete production identity system. Add password reset, email verification, rate limiting, and audit logs before using it at large scale.
 
-Filter files
