@@ -424,6 +424,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-head);
   <div class="files-box"><h2>My private files</h2><p>Files remain only in this browser and are never sent to the room board, your friends, or Supabase. Add your <b>DSA War Room</b> HTML file here, then use <b>Open</b> whenever you want to study.</p><label class="files-drop">+ Add files from this computer<input id="private-file-picker" type="file" multiple onchange="addPrivateFiles(this.files)"></label><div id="private-files-list"></div><div class="live-actions"><button class="live-action" onclick="closePrivateFiles()">Close</button></div></div>
 </div>
 <div class="live-overlay" id="private-file-viewer" style="display:none;padding:16px;z-index:1001;">
+  <button id="private-file-close" class="live-action" onclick="closePrivateFileViewer()" aria-label="Close private file" style="position:fixed;top:18px;right:22px;z-index:1010;background:#252938;border-color:#7b8299;font-size:15px;padding:10px 14px;box-shadow:0 5px 20px #0008;">× Close file</button>
   <div style="width:min(1280px,100%);height:min(900px,100%);display:flex;flex-direction:column;gap:10px;">
     <div class="live-actions" style="justify-content:flex-start"><button class="live-action" onclick="closePrivateFileViewer()">← Back to My Files</button></div>
     <iframe id="private-file-frame" title="Private file viewer" style="width:100%;flex:1;border:1px solid var(--border2);border-radius:10px;background:#fff"></iframe>
@@ -1189,6 +1190,7 @@ async function addPrivateFiles(list){try{const files=[...list];if(!files.length)
 let privateViewerUrl=null;
 async function openPrivateFile(id){const file=await privateFile(id);if(!file)return alert('That private file is no longer available.');if(privateViewerUrl)URL.revokeObjectURL(privateViewerUrl);privateViewerUrl=URL.createObjectURL(file.blob);document.getElementById('private-files-overlay').style.display='none';document.getElementById('private-file-frame').src=privateViewerUrl;document.getElementById('private-file-viewer').style.display='flex'}
 function closePrivateFileViewer(){document.getElementById('private-file-viewer').style.display='none';document.getElementById('private-file-frame').src='about:blank';if(privateViewerUrl){URL.revokeObjectURL(privateViewerUrl);privateViewerUrl=null}openPrivateFiles()}
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&document.getElementById('private-file-viewer').style.display!=='none')closePrivateFileViewer()});
 async function deletePrivateFile(id,name){if(!confirm(`Delete ${name}? This removes it only from this browser.`))return;const db=await privateFilesDb();const tx=db.transaction(PRIVATE_FILES_STORE,'readwrite');tx.objectStore(PRIVATE_FILES_STORE).delete(id);await new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});db.close();renderPrivateFiles()}
 </script>
 <script>
